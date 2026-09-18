@@ -12,6 +12,8 @@ resources:
         - environment_key: default
           spec:
             environment_version: "2"
+            dependencies:
+              - ../../dist/*.whl
 
       tasks:
         - task_key: bronze
@@ -25,8 +27,6 @@ resources:
               - "workspace.pix_fraud_dev.bronze_pix_transacoes"
               - "--control-table"
               - "workspace.pix_fraud_dev.ingestion_control"
-          libraries:
-            - whl: ../../dist/*.whl
 
         - task_key: silver
           depends_on:
@@ -34,8 +34,6 @@ resources:
           environment_key: default
           spark_python_task:
             python_file: ../../jobs/silver_job.py
-          libraries:
-            - whl: ../../dist/*.whl
 
         - task_key: gold
           depends_on:
@@ -43,5 +41,3 @@ resources:
           environment_key: default
           spark_python_task:
             python_file: ../../jobs/gold_job.py
-          libraries:
-            - whl: ../../dist/*.whl
