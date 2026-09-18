@@ -1,24 +1,37 @@
+import argparse
+
+from pyspark.sql import functions as F
+
 from pix_fraud.transformations.silver import transform_silver
 from pix_fraud.repositories.delta_repository import (
     get_watermark,
     merge_delta,
     set_watermark,
 )
-from pyspark.sql import functions as F
 
 
-BRONZE_TABLE = spark.conf.get(
-    "pix_fraud.bronze_table", "pix_fraud_dev.bronze_pix_transacoes"
-)
-SILVER_TABLE = spark.conf.get(
-    "pix_fraud.silver_table", "pix_fraud_dev.silver_pix_transacoes"
-)
-THRESHOLD_TABLE = spark.conf.get(
-    "pix_fraud.threshold_table", "pix_fraud_dev.risk_thresholds"
-)
-WATERMARK_TABLE = spark.conf.get(
-    "pix_fraud.watermark_table", "pix_fraud_dev.layer_watermarks"
-)
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--bronze-table", required=True)
+    parser.add_argument("--silver-table", required=True)
+    parser.add_argument("--threshold-table", required=True)
+    parser.add_argument("--watermark-table", required=True)
+
+    return parser.parse_args()
+
+
+args = parse_args()
+
+BRONZE_TABLE = args.bronze_table
+SILVER_TABLE = args.silver_table
+THRESHOLD_TABLE = args.threshold_table
+WATERMARK_TABLE = args.watermark_table
+
+
+# ---------------------------------------------------------------------------
+# 1. Recupera a versão ativa dos thresholds
+# ---------------------------------------------------------------------------
 
 threshold = (
     spark.table(THRESHOLD_TABLE)
@@ -29,31 +42,99 @@ threshold = (
 )
 
 if not threshold:
-    raise RuntimeError(f"Nenhum threshold ativo encontrado em {THRESHOLD_TABLE}")
+    raise RuntimeError(
+        f"Nenhum threshold ativo encontrado em {THRESHOLD_TABLE}"
+    )
 
-watermark = get_watermark(spark, WATERMARK_TABLE, "silver")
 
-bronze = spark.table(BRONZE_TABLE)
+# ---------------------------------------------------------------------------
+# 2. Recupera o último watermark processado pela Silver
+# ---------------------------------------------------------------------------
+
+watermark = get_watermark(
+    spark,
+    WATERMARK_TABLE,
+    "silver",
+)
+
+
+# ---------------------------------------------------------------------------
+# 3. Lê a Bronze incrementalmente
+# ---------------------------------------------------------------------------
+
+bronze_df = spark.table(BRONZE_TABLE)
+
 if watermark is not None:
-    bronze = bronze.filter(F.col("ingestion_timestamp") > F.lit(watermark))
+    bronze_df = bronze_df.filter(
+        F.col("ingestion_timestamp") > F.lit(watermark)
+    )
 
-if bronze.limit(1).count() == 0:
-    print("Nenhum registro novo para Silver.")
+
+# ---------------------------------------------------------------------------
+# 4. Verifica se existem registros novos
+# ---------------------------------------------------------------------------
+
+if bronze_df.limit(1).count() == 0:
+    print("Nenhum registro novo para processar na Silver.")
+
 else:
-    silver = transform_silver(
-        bronze,
+    # -----------------------------------------------------------------------
+    # 5. Aplica as transformações e regras da Silver
+    # -----------------------------------------------------------------------
+
+    silver_df = transform_silver(
+        bronze_df,
         p95_valor_brl=threshold["p95_valor_brl"],
-        p95_razao_saldo_residual=threshold["p95_razao_saldo_residual"],
-        p95_proporcao_valor_recebedor=threshold["p95_proporcao_valor_recebedor"],
+        p95_razao_saldo_residual=threshold[
+            "p95_razao_saldo_residual"
+        ],
+        p95_proporcao_valor_recebedor=threshold[
+            "p95_proporcao_valor_recebedor"
+        ],
         threshold_version=threshold["threshold_version"],
     )
 
+
+    # -----------------------------------------------------------------------
+    # 6. MERGE idempotente utilizando transaction_id
+    # -----------------------------------------------------------------------
+
     merge_delta(
         spark=spark,
-        df=silver,
+        df=silver_df,
         target_table=SILVER_TABLE,
         key="transaction_id",
     )
 
-    max_ingestion = silver.agg(F.max("ingestion_timestamp")).first()[0]
-    set_watermark(spark, WATERMARK_TABLE, "silver", max_ingestion)
+
+    # -----------------------------------------------------------------------
+    # 7. Obtém o maior ingestion_timestamp processado
+    # -----------------------------------------------------------------------
+
+    max_ingestion_timestamp = (
+        silver_df
+        .agg(F.max("ingestion_timestamp"))
+        .first()[0]
+    )
+
+    if max_ingestion_timestamp is None:
+        raise RuntimeError(
+            "Não foi possível determinar o watermark da Silver."
+        )
+
+
+    # -----------------------------------------------------------------------
+    # 8. Atualiza o watermark somente após o MERGE bem-sucedido
+    # -----------------------------------------------------------------------
+
+    set_watermark(
+        spark,
+        WATERMARK_TABLE,
+        "silver",
+        max_ingestion_timestamp,
+    )
+
+    print(
+        "Processamento Silver concluído com sucesso. "
+        f"Watermark atualizado para {max_ingestion_timestamp}."
+    )
