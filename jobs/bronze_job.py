@@ -49,7 +49,7 @@ if not new_files:
     print("Nenhum arquivo novo para processar.")
 else:
     source_df = spark.read.parquet(*new_files)
-    bronze_df = transform_bronze(source_df).cache()
+    bronze_df = transform_bronze(source_df)
 
     merge_delta(
         spark=spark,
