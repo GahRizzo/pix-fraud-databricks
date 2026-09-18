@@ -18,6 +18,13 @@ resources:
           environment_key: default
           spark_python_task:
             python_file: ../../jobs/bronze_job.py
+            parameters:
+              - "--source-path"
+              - "/Volumes/workspace/pix_fraud_dev/pix_ingestion/input/"
+              - "--bronze-table"
+              - "workspace.pix_fraud_dev.bronze_pix_transacoes"
+              - "--control-table"
+              - "workspace.pix_fraud_dev.ingestion_control"
 
         - task_key: silver
           depends_on:

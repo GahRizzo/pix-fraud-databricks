@@ -3,10 +3,19 @@ from pyspark.sql import functions as F
 from pix_fraud.transformations.bronze import transform_bronze
 from pix_fraud.repositories.delta_repository import merge_delta, table_exists
 
+import argparse
 
-SOURCE_PATH = spark.conf.get("pix_fraud.source_path")
-BRONZE_TABLE = spark.conf.get("pix_fraud.bronze_table")
-CONTROL_TABLE = spark.conf.get("pix_fraud.ingestion_control_table")
+parser = argparse.ArgumentParser()
+
+parser.add_argument("--source-path", required=True)
+parser.add_argument("--bronze-table", required=True)
+parser.add_argument("--control-table", required=True)
+
+args = parser.parse_args()
+
+SOURCE_PATH = args.source_path
+BRONZE_TABLE = args.bronze_table
+CONTROL_TABLE = args.control_table
 
 
 # Batch incremental explícito:
