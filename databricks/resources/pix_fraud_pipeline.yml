@@ -1,0 +1,48 @@
+resources:
+  jobs:
+    pix_fraud_daily_pipeline:
+      name: pix_fraud_daily_pipeline
+
+      schedule:
+        quartz_cron_expression: "0 0 2 * * ?"
+        timezone_id: "America/Sao_Paulo"
+        pause_status: "UNPAUSED"
+
+      tasks:
+        - task_key: bronze
+          spark_python_task:
+            python_file: ../../jobs/bronze_job.py
+          job_cluster_key: pix_fraud_cluster
+
+        - task_key: silver
+          depends_on:
+            - task_key: bronze
+          spark_python_task:
+            python_file: ../../jobs/silver_job.py
+          job_cluster_key: pix_fraud_cluster
+
+        - task_key: gold
+          depends_on:
+            - task_key: silver
+          spark_python_task:
+            python_file: ../../jobs/gold_job.py
+          job_cluster_key: pix_fraud_cluster
+
+      job_clusters:
+        - job_cluster_key: pix_fraud_cluster
+          new_cluster:
+            spark_version: "13.3.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 2
+            spark_conf:
+              spark.pix_fraud.environment: "dev"
+              spark.pix_fraud.source_path: "/mnt/pix-fraud/raw"
+              spark.pix_fraud.bronze_table: "pix_fraud_dev.bronze_pix_transacoes"
+              spark.pix_fraud.silver_table: "pix_fraud_dev.silver_pix_transacoes"
+              spark.pix_fraud.threshold_table: "pix_fraud_dev.risk_thresholds"
+              spark.pix_fraud.ingestion_control_table: "pix_fraud_dev.ingestion_control"
+              spark.pix_fraud.watermark_table: "pix_fraud_dev.layer_watermarks"
+              spark.pix_fraud.gold_risk_table: "pix_fraud_dev.gold_eficacia_risco_pix"
+              spark.pix_fraud.gold_operational_table: "pix_fraud_dev.gold_operacional"
+              spark.pix_fraud.gold_alerts_table: "pix_fraud_dev.gold_alertas_pix"
+              spark.pix_fraud.alert_score: "3"

@@ -1,0 +1,70 @@
+from pyspark.sql import functions as F
+
+from pix_fraud.transformations.bronze import transform_bronze
+from pix_fraud.repositories.delta_repository import merge_delta, table_exists
+
+
+SOURCE_PATH = spark.conf.get("pix_fraud.source_path", "/mnt/pix-fraud/raw")
+BRONZE_TABLE = spark.conf.get(
+    "pix_fraud.bronze_table", "pix_fraud_dev.bronze_pix_transacoes"
+)
+CONTROL_TABLE = spark.conf.get(
+    "pix_fraud.ingestion_control_table", "pix_fraud_dev.ingestion_control"
+)
+
+
+# Batch incremental explícito:
+# 1. lista os arquivos disponíveis na origem;
+# 2. remove os que já foram processados com sucesso;
+# 3. lê somente os arquivos novos;
+# 4. faz MERGE por transaction_id;
+# 5. registra os arquivos processados.
+files = [
+    item.path
+    for item in dbutils.fs.ls(SOURCE_PATH)
+    if item.isFile() and item.path.lower().endswith(".parquet")
+]
+
+processed = set()
+if table_exists(spark, CONTROL_TABLE):
+    processed = {
+        row["source_file"]
+        for row in (
+            spark.table(CONTROL_TABLE)
+            .filter(F.col("status") == "SUCCESS")
+            .select("source_file")
+            .distinct()
+            .collect()
+        )
+    }
+
+new_files = sorted(set(files) - processed)
+
+if not new_files:
+    print("Nenhum arquivo novo para processar.")
+else:
+    source_df = spark.read.parquet(*new_files)
+    bronze_df = transform_bronze(source_df).cache()
+
+    merge_delta(
+        spark=spark,
+        df=bronze_df,
+        target_table=BRONZE_TABLE,
+        key="transaction_id",
+    )
+
+    control_df = spark.createDataFrame(
+        [(path, "SUCCESS") for path in new_files],
+        "source_file string, status string",
+    ).withColumn("processed_at", F.current_timestamp())
+
+    (
+        control_df
+        .select("source_file", "processed_at", "status")
+        .write
+        .format("delta")
+        .mode("append")
+        .saveAsTable(CONTROL_TABLE)
+    )
+
+    bronze_df.unpersist()
