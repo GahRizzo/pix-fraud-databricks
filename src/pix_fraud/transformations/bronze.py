@@ -40,7 +40,7 @@ def add_transaction_id(df: DataFrame) -> DataFrame:
 def add_ingestion_metadata(df: DataFrame) -> DataFrame:
     return (
         df
-        .withColumn("source_file", F.input_file_name())
+        .withColumn("source_file", F.col("_source_file"))
         .withColumn("ingestion_timestamp", F.current_timestamp())
         .withColumn("ingestion_date", F.current_date())
     )
