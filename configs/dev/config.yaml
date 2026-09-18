@@ -1,7 +1,7 @@
 environment: dev
 
 source:
-  path: "/mnt/pix-fraud/raw"
+  path: "/Volumes/workspace/pix_fraud_dev/pix_ingestion/input/"
 
 tables:
   bronze: "pix_fraud_dev.bronze_pix_transacoes"

@@ -1,0 +1,10 @@
+bundle:
+  name: pix-fraud-databricks
+
+include:
+  - databricks/resources/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true

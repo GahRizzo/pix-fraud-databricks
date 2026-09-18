@@ -4,13 +4,9 @@ from pix_fraud.transformations.bronze import transform_bronze
 from pix_fraud.repositories.delta_repository import merge_delta, table_exists
 
 
-SOURCE_PATH = spark.conf.get("pix_fraud.source_path", "/mnt/pix-fraud/raw")
-BRONZE_TABLE = spark.conf.get(
-    "pix_fraud.bronze_table", "pix_fraud_dev.bronze_pix_transacoes"
-)
-CONTROL_TABLE = spark.conf.get(
-    "pix_fraud.ingestion_control_table", "pix_fraud_dev.ingestion_control"
-)
+SOURCE_PATH = spark.conf.get("pix_fraud.source_path")
+BRONZE_TABLE = spark.conf.get("pix_fraud.bronze_table")
+CONTROL_TABLE = spark.conf.get("pix_fraud.ingestion_control_table")
 
 
 # Batch incremental explícito:
