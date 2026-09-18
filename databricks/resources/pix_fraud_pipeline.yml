@@ -50,3 +50,21 @@ resources:
           environment_key: default
           spark_python_task:
             python_file: ../../jobs/gold_job.py
+            parameters:
+              - "--silver-table"
+              - "workspace.pix_fraud_dev.silver_pix_transacoes"
+
+              - "--gold-risk-table"
+              - "workspace.pix_fraud_dev.gold_eficacia_risco_pix"
+
+              - "--gold-operational-table"
+              - "workspace.pix_fraud_dev.gold_operacional"
+
+              - "--gold-alerts-table"
+              - "workspace.pix_fraud_dev.gold_alertas_pix"
+
+              - "--watermark-table"
+              - "workspace.pix_fraud_dev.layer_watermarks"
+
+              - "--alert-score"
+              - "3"
