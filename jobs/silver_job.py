@@ -12,6 +12,9 @@ from pix_fraud.quality.quality_checks import (
     run_quality_checks,
     validate_quality_checks,
 )
+from pix_fraud.services.threshold_service import (
+    get_active_threshold,
+)
 
 
 def parse_args():
@@ -37,19 +40,15 @@ WATERMARK_TABLE = args.watermark_table
 # 1. Recupera a versão ativa dos thresholds
 # ---------------------------------------------------------------------------
 
-threshold = (
-    spark.table(THRESHOLD_TABLE)
-    .filter(F.col("valid_to").isNull())
-    .orderBy(F.col("valid_from").desc())
-    .limit(1)
-    .first()
+threshold = get_active_threshold(
+    spark,
+    THRESHOLD_TABLE,
 )
 
-if not threshold:
+if threshold is None:
     raise RuntimeError(
         f"Nenhum threshold ativo encontrado em {THRESHOLD_TABLE}"
     )
-
 
 # ---------------------------------------------------------------------------
 # 2. Recupera o último watermark processado pela Silver
@@ -61,7 +60,6 @@ watermark = get_watermark(
     "silver",
 )
 
-
 # ---------------------------------------------------------------------------
 # 3. Lê a Bronze incrementalmente
 # ---------------------------------------------------------------------------
@@ -72,7 +70,6 @@ if watermark is not None:
     bronze_df = bronze_df.filter(
         F.col("ingestion_timestamp") > F.lit(watermark)
     )
-
 
 # ---------------------------------------------------------------------------
 # 4. Verifica se existem registros novos
@@ -98,7 +95,6 @@ else:
         threshold_version=threshold["threshold_version"],
     )
 
-
     # ---------------------------------------------------------------------------
     # 6. Quality Gate
     # ---------------------------------------------------------------------------
@@ -113,7 +109,6 @@ else:
 
     validate_quality_checks(quality_results)
 
-
     # -----------------------------------------------------------------------
     # 7. MERGE idempotente utilizando transaction_id
     # -----------------------------------------------------------------------
@@ -124,7 +119,6 @@ else:
         target_table=SILVER_TABLE,
         key="transaction_id",
     )
-
 
     # -----------------------------------------------------------------------
     # 8. Obtém o maior ingestion_timestamp processado
@@ -140,7 +134,6 @@ else:
         raise RuntimeError(
             "Não foi possível determinar o watermark da Silver."
         )
-
 
     # -----------------------------------------------------------------------
     # 9. Atualiza o watermark somente após o MERGE bem-sucedido

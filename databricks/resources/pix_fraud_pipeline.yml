@@ -28,9 +28,21 @@ resources:
               - "--control-table"
               - "workspace.pix_fraud_dev.ingestion_control"
 
-        - task_key: silver
+        - task_key: threshold_bootstrap
           depends_on:
             - task_key: bronze
+          environment_key: default
+          spark_python_task:
+            python_file: ../../jobs/threshold_bootstrap_job.py
+            parameters:
+              - --bronze-table
+              - workspace.pix_fraud_dev.bronze_pix_transacoes
+              - --threshold-table
+              - workspace.pix_fraud_dev.risk_thresholds
+
+        - task_key: silver
+          depends_on:
+            - task_key: threshold_bootstrap
           environment_key: default
           spark_python_task:
             python_file: ../../jobs/silver_job.py
