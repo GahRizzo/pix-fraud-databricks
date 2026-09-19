@@ -25,5 +25,3 @@ resources:
               - "workspace.pix_fraud_dev.bronze_pix_transacoes"
               - "--threshold-table"
               - "workspace.pix_fraud_dev.risk_thresholds"
-              - "--environment"
-              - "dev"

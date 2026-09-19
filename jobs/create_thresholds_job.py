@@ -11,14 +11,12 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bronze-table", required=True)
     parser.add_argument("--threshold-table", required=True)
-    parser.add_argument("--environment", required=True)
     return parser.parse_args()
 
 
 args = parse_args()
 BRONZE_TABLE = args.bronze_table
 THRESHOLD_TABLE = args.threshold_table
-ENVIRONMENT = args.environment
 
 bronze = spark.table(BRONZE_TABLE)
 if bronze.limit(1).count() == 0:
@@ -48,7 +46,6 @@ threshold_version = calibrated_at.strftime("%Y%m%dT%H%M%S%fZ")
 threshold_df = spark.createDataFrame(
     [(
         threshold_version,
-        ENVIRONMENT,
         calibrated_at,
         None,
         float(values["p95_valor_brl"]),
@@ -58,7 +55,6 @@ threshold_df = spark.createDataFrame(
     )],
     """
     threshold_version string,
-    environment string,
     valid_from timestamp,
     valid_to timestamp,
     p95_valor_brl double,
@@ -71,7 +67,7 @@ threshold_df = spark.createDataFrame(
 if table_exists(spark, THRESHOLD_TABLE):
     target = DeltaTable.forName(spark, THRESHOLD_TABLE)
     target.update(
-        condition=(F.col("valid_to").isNull()) & (F.col("environment") == ENVIRONMENT),
+        condition=(F.col("valid_to").isNull()),
         set={"valid_to": F.lit(calibrated_at)},
     )
 
