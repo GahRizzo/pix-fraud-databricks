@@ -8,6 +8,10 @@ from pix_fraud.repositories.delta_repository import (
     merge_delta,
     set_watermark,
 )
+from pix_fraud.quality.quality_checks import (
+    run_quality_checks,
+    validate_quality_checks,
+)
 
 
 def parse_args():
@@ -95,8 +99,23 @@ else:
     )
 
 
+    # ---------------------------------------------------------------------------
+    # 6. Quality Gate
+    # ---------------------------------------------------------------------------
+
+    quality_results = run_quality_checks(
+        bronze=bronze_df,
+        silver=silver_df,
+    )
+
+    print("Resultado dos quality checks:")
+    print(quality_results)
+
+    validate_quality_checks(quality_results)
+
+
     # -----------------------------------------------------------------------
-    # 6. MERGE idempotente utilizando transaction_id
+    # 7. MERGE idempotente utilizando transaction_id
     # -----------------------------------------------------------------------
 
     merge_delta(
@@ -108,7 +127,7 @@ else:
 
 
     # -----------------------------------------------------------------------
-    # 7. Obtém o maior ingestion_timestamp processado
+    # 8. Obtém o maior ingestion_timestamp processado
     # -----------------------------------------------------------------------
 
     max_ingestion_timestamp = (
@@ -124,7 +143,7 @@ else:
 
 
     # -----------------------------------------------------------------------
-    # 8. Atualiza o watermark somente após o MERGE bem-sucedido
+    # 9. Atualiza o watermark somente após o MERGE bem-sucedido
     # -----------------------------------------------------------------------
 
     set_watermark(
