@@ -14,6 +14,7 @@ def merge_delta(
     key: str = "transaction_id",
 ) -> None:
     """Upsert idempotente por chave natural/determinística."""
+
     if not table_exists(spark, target_table):
         (
             df.write
@@ -24,16 +25,24 @@ def merge_delta(
         return
 
     target = DeltaTable.forName(spark, target_table)
+
     (
         target.alias("target")
-        .merge(df.alias("source"), f"target.{key} = source.{key}")
+        .merge(
+            df.alias("source"),
+            f"target.{key} = source.{key}",
+        )
         .whenMatchedUpdateAll()
         .whenNotMatchedInsertAll()
         .execute()
     )
 
 
-def get_watermark(spark, table_name: str, layer_name: str):
+def get_watermark(
+    spark,
+    table_name: str,
+    layer_name: str,
+):
     if not table_exists(spark, table_name):
         return None
 
@@ -44,23 +53,51 @@ def get_watermark(spark, table_name: str, layer_name: str):
         .limit(1)
         .first()
     )
-    return row["last_ingestion_timestamp"] if row else None
+
+    return (
+        row["last_ingestion_timestamp"]
+        if row
+        else None
+    )
 
 
-def set_watermark(spark, table_name: str, layer_name: str, value) -> None:
-    row_df = spark.createDataFrame(
-        [(layer_name, value)],
-        "layer_name string, last_ingestion_timestamp timestamp",
-    ).withColumn("updated_at", F.current_timestamp())
+def set_watermark(
+    spark,
+    table_name: str,
+    layer_name: str,
+    value,
+) -> None:
+    row_df = (
+        spark.createDataFrame(
+            [(layer_name, value)],
+            "layer_name string, last_ingestion_timestamp timestamp",
+        )
+        .withColumn(
+            "updated_at",
+            F.current_timestamp(),
+        )
+    )
 
     if not table_exists(spark, table_name):
-        row_df.write.format("delta").mode("overwrite").saveAsTable(table_name)
+        (
+            row_df.write
+            .format("delta")
+            .mode("overwrite")
+            .saveAsTable(table_name)
+        )
         return
 
-    target = DeltaTable.forName(spark, table_name)
+    target = DeltaTable.forName(
+        spark,
+        table_name,
+    )
+
     (
         target.alias("target")
-        .merge(row_df.alias("source"), "target.layer_name = source.layer_name")
+        .merge(
+            row_df.alias("source"),
+            "target.layer_name = source.layer_name",
+        )
         .whenMatchedUpdateAll()
         .whenNotMatchedInsertAll()
         .execute()
