@@ -33,41 +33,6 @@ def merge_delta(
     )
 
 
-def merge_delta_additive(
-    spark,
-    df: DataFrame,
-    target_table: str,
-    keys: list[str],
-    additive_columns: list[str],
-) -> None:
-    """Faz MERGE de agregados, somando somente o lote incremental."""
-    if not table_exists(spark, target_table):
-        (
-            df.write
-            .format("delta")
-            .mode("overwrite")
-            .saveAsTable(target_table)
-        )
-        return
-
-    target = DeltaTable.forName(spark, target_table)
-    condition = " AND ".join(
-        f"target.{key} = source.{key}" for key in keys
-    )
-    updates = {
-        column: f"target.{column} + source.{column}"
-        for column in additive_columns
-    }
-
-    (
-        target.alias("target")
-        .merge(df.alias("source"), condition)
-        .whenMatchedUpdate(set=updates)
-        .whenNotMatchedInsertAll()
-        .execute()
-    )
-
-
 def get_watermark(spark, table_name: str, layer_name: str):
     if not table_exists(spark, table_name):
         return None

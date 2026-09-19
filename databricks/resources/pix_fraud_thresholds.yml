@@ -1,0 +1,29 @@
+resources:
+  jobs:
+    pix_fraud_weekly_thresholds:
+      name: pix_fraud_weekly_thresholds
+
+      schedule:
+        quartz_cron_expression: "0 0 3 ? * SUN"
+        timezone_id: "America/Sao_Paulo"
+        pause_status: "UNPAUSED"
+
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "2"
+            dependencies:
+              - ../../dist/*.whl
+
+      tasks:
+        - task_key: recalibrate_thresholds
+          environment_key: default
+          spark_python_task:
+            python_file: ../../jobs/create_thresholds_job.py
+            parameters:
+              - "--bronze-table"
+              - "workspace.pix_fraud_dev.bronze_pix_transacoes"
+              - "--threshold-table"
+              - "workspace.pix_fraud_dev.risk_thresholds"
+              - "--environment"
+              - "dev"

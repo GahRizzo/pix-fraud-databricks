@@ -1,10 +1,8 @@
 [project]
 name = "pix-fraud-databricks"
-version = "1.0.3"
+version = "1.1.0"
 requires-python = ">=3.10"
-dependencies = [
-    "pyyaml>=6.0"
-]
+dependencies = []
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
