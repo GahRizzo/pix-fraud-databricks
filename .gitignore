@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Build artifacts
+dist/
+build/
+*.whl
+
+# Databricks Asset Bundles
+.databricks/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

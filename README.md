@@ -1,6 +1,6 @@
 # PIX Fraud — Databricks
 
-Pipeline de engenharia de dados para análise de risco em transações PIX, implementado em PySpark/Delta Lake e implantado com Databricks Asset Bundles (DAB). O processamento principal é **batch incremental e idempotente**, organizado nas camadas Bronze, Silver e Gold.
+Pipeline de engenharia de dados para análise de risco em transações PIX, implementado em PySpark/Delta Lake e implantado com Databricks Asset Bundles (DAB). O processamento principal é **batch incremental e idempotente**, organizado nas camadas Bronze, Silver e Gold e executado em compute Serverless.
 
 ## Arquitetura
 
@@ -11,6 +11,12 @@ Parquet em Unity Catalog Volume
 +-----------------------+      diário 02:00 America/Sao_Paulo
 | Bronze                |
 | arquivos incrementais |
++-----------+-----------+
+            |
+            v
++-----------------------+
+| Threshold Bootstrap   |
+| cria somente se faltar|
 +-----------+-----------+
             |
             v
@@ -43,17 +49,20 @@ O pipeline não utiliza Structured Streaming nem Auto Loader. A incrementalidade
 
 ### `pix_fraud_daily_pipeline`
 
-Executado diariamente às 02:00 (`America/Sao_Paulo`) com três tasks dependentes:
+Executado diariamente às 02:00 (`America/Sao_Paulo`) com quatro tasks dependentes:
 
-1. `bronze`
-2. `silver`, após Bronze
-3. `gold`, após Silver
+1. `bronze`;
+2. `threshold_bootstrap`, após Bronze;
+3. `silver`, após o bootstrap;
+4. `gold`, após Silver.
+
+O bootstrap torna a primeira execução autônoma: se não houver threshold ativo, ele calcula e publica a primeira versão a partir da Bronze. Nas execuções seguintes, se já existir uma versão ativa, a task termina sem recalibrar.
 
 ### `pix_fraud_weekly_thresholds`
 
 Executado aos domingos às 03:00. Recalcula os percentis de risco sobre o estado completo da Bronze e publica uma nova versão em `risk_thresholds`. A versão anterior recebe `valid_to`; a nova permanece ativa com `valid_to IS NULL`.
 
-O Job semanal é independente do pipeline diário para evitar recalibração silenciosa dos critérios de risco em cada ingestão.
+O Job semanal é independente do pipeline diário para evitar recalibração silenciosa dos critérios de risco em cada ingestão. A lógica de cálculo e publicação é compartilhada com o bootstrap por `threshold_service.py`.
 
 ## Bronze
 
@@ -100,22 +109,27 @@ Antes do `MERGE` na Silver, `run_quality_checks` mede o batch Bronze → Silver 
 
 ## Thresholds de risco
 
-`create_thresholds_job.py` calcula semanalmente P95 para:
+A lógica compartilhada em `src/pix_fraud/services/threshold_service.py` calcula P95 para:
 
 - valor da transação (`valor_brl`);
 - razão de saldo residual do pagador;
 - proporção entre valor da transação e saldo anterior do recebedor.
 
-Cada calibração recebe uma `threshold_version` baseada no timestamp UTC da execução. A tabela mantém histórico por `valid_from` e `valid_to`; somente uma versão por ambiente deve permanecer ativa.
+Cada calibração recebe uma `threshold_version` baseada no timestamp UTC da execução. A tabela mantém histórico por `valid_from` e `valid_to`, e a versão ativa é aquela com `valid_to IS NULL`.
 
-Para a primeira execução da Silver, `risk_thresholds` precisa conter uma versão ativa. O Job semanal pode ser executado manualmente uma vez para inicialização.
+Há dois consumidores dessa lógica:
+
+- `threshold_bootstrap_job.py`: publica uma versão somente quando ainda não existe threshold ativo;
+- `create_thresholds_job.py`: recalibra semanalmente e publica uma nova versão.
+
+Assim, um ambiente novo pode executar diretamente o pipeline diário: Bronze → Bootstrap → Silver → Gold.
 
 ## Gold
 
 A Gold usa o watermark `gold` para detectar se há novas transações na Silver.
 
-- `gold_eficacia_risco_pix`: snapshot agregado recalculado sobre toda a Silver e gravado com `overwrite`.
-- `gold_operacional`: snapshot agregado recalculado sobre toda a Silver e gravado com `overwrite`.
+- `gold_eficacia_risco_pix`: snapshot agregado recalculado sobre toda a Silver e gravado com `overwrite`;
+- `gold_operacional`: snapshot agregado recalculado sobre toda a Silver e gravado com `overwrite`;
 - `gold_alertas_pix`: somente novos alertas são processados e persistidos por `MERGE` idempotente em `transaction_id`.
 
 O watermark da Gold só é atualizado depois que todas as saídas terminam com sucesso.
@@ -129,10 +143,9 @@ O watermark da Gold só é atualizado depois que todas as saídas terminam com s
 │   └── resources/
 │       ├── pix_fraud_pipeline.yml
 │       └── pix_fraud_thresholds.yml
-├── ddl/
-│   └── create_tables.sql
 ├── jobs/
 │   ├── bronze_job.py
+│   ├── threshold_bootstrap_job.py
 │   ├── silver_job.py
 │   ├── gold_job.py
 │   └── create_thresholds_job.py
@@ -143,12 +156,17 @@ O watermark da Gold só é atualizado depois que todas as saídas terminam com s
 │   │   └── quality_checks.py
 │   ├── repositories/
 │   │   └── delta_repository.py
+│   ├── services/
+│   │   └── threshold_service.py
 │   └── transformations/
 │       ├── bronze.py
 │       ├── silver.py
 │       └── gold.py
 ├── tests/
+│   └── unit/
+│       └── test_bronze_contract.py
 ├── pyproject.toml
+├── requirements-dev.txt
 └── README.md
 ```
 
@@ -176,7 +194,13 @@ Watermarks:
 workspace.pix_fraud_dev.layer_watermarks
 ```
 
-Os parâmetros de deployment estão centralizados nos arquivos em `databricks/resources/`. Os antigos YAMLs de configuração da aplicação foram removidos porque não participavam da execução atual.
+As configurações do ambiente `dev` estão atualmente explícitas nos YAMLs em `databricks/resources/`. Caso novos ambientes sejam adicionados, o próximo passo recomendado é transformar esses caminhos e nomes de tabela em variáveis do Bundle por target.
+
+## Preparação do ambiente
+
+As tabelas e os objetos de controle necessários são criados automaticamente pelos próprios Jobs na primeira persistência. `risk_thresholds` é criada automaticamente pelo bootstrap ou pela recalibração semanal.
+
+É necessário disponibilizar ao menos um Parquet válido no Volume de entrada antes do primeiro run, pois o bootstrap depende da Bronze para calcular os thresholds iniciais.
 
 ## Deploy com DAB
 
@@ -192,24 +216,31 @@ Após mudanças no código de `src/`, faça novo deploy para que o wheel atualiz
 
 ## Idempotência
 
-- Bronze: controle por arquivo + `MERGE(transaction_id)`.
-- Silver: watermark + `MERGE(transaction_id)`.
-- Gold snapshots: reconstrução determinística + `overwrite`.
-- Gold alertas: watermark + `MERGE(transaction_id)`.
-- Thresholds: histórico versionado; cada execução publica uma nova calibração.
+- Bronze: controle por arquivo + `MERGE(transaction_id)`;
+- Threshold bootstrap: no-op quando já existe versão ativa;
+- Silver: watermark + `MERGE(transaction_id)`;
+- Gold snapshots: reconstrução determinística + `overwrite`;
+- Gold alertas: watermark + `MERGE(transaction_id)`;
+- Threshold semanal: histórico versionado; cada execução publica uma nova calibração.
 
 ## Testes
 
-Os testes unitários ficam em `tests/unit`. Execute localmente com:
+Instale as dependências de desenvolvimento e execute:
 
 ```bash
+python -m pip install -r requirements-dev.txt
 pytest
 ```
 
-## Próximas evoluções possíveis
+Também é recomendável validar o Bundle antes do deploy no workspace.
+
+## Pontos de evolução
+
+O pipeline atual está operacional. Evoluções úteis, mas não necessárias para seu funcionamento atual:
 
 - persistir resultados dos quality checks para observabilidade histórica;
 - adicionar checksum/versionamento ao controle de arquivos da Bronze;
-- parametrizar targets adicionais (`prod`) no DAB;
-- adicionar testes Spark para transformações e quality gate;
-- adicionar CI para testes, build e validação do bundle.
+- parametrizar os recursos DAB para targets adicionais, como `prod`;
+- ampliar os testes Spark para Silver, Gold, thresholds e quality gate;
+- adicionar CI para testes, build e validação do Bundle;
+- avaliar uma janela móvel de calibração dos thresholds quando o histórico da Bronze crescer significativamente.
